@@ -38,8 +38,8 @@ Raw Imageを
 
 ## 準備
 ```
-git clone
-cd
+git clone git@github.com:tidbots/image_preprocess.git
+cd image_preprocess
 docker compose build
 
 ```
