@@ -1,25 +1,48 @@
-
 <launch>
-  <node pkg="image_preprocess"
-        type="preprocess_node.py"
-        name="image_preprocess"
-        output="screen">
+  <node pkg="image_preprocess" type="preprocess_node.py" name="image_preprocess" output="screen">
 
-    <param name="input_topic"  value="/usb_cam/image_raw"/>
+    <!-- topics -->
+    <param name="input_topic" value="/usb_cam/image_raw"/>
     <param name="output_topic" value="/camera/image_preprocessed"/>
 
-    <!-- brightness thresholds -->
-    <param name="dark_thresh"   value="60"/>
-    <param name="bright_thresh" value="190"/>
+    <!-- base preprocess params -->
+    <param name="gamma" value="1.10"/>
+    <param name="clahe_clip" value="2.5"/>
+    <param name="clahe_grid" value="8"/>
 
-    <!-- gamma -->
-    <param name="gamma_dark"    value="0.6"/>
-    <param name="gamma_normal"  value="1.0"/>
-    <param name="gamma_bright"  value="1.6"/>
+    <!-- debug overlay -->
+    <param name="debug_enable" value="false"/>
+    <param name="debug_topic" value="/camera/image_preprocess_debug"/>
 
-    <!-- CLAHE -->
-    <param name="use_clahe"     value="true"/>
-    <param name="clahe_clip"    value="2.0"/>
-    <param name="clahe_grid"    value="8"/>
+    <!-- =========================
+         Auto re-tuning (ON/OFF)
+         ========================= -->
+    <param name="auto_tune_enable" value="true"/>
+
+    <!-- tuning behavior -->
+    <param name="auto_tune_update_every_n" value="8"/>
+    <param name="auto_tune_min_update_interval" value="0.25"/>
+    <param name="ema_alpha" value="0.15"/>
+
+    <!-- detection thresholds -->
+    <param name="dark_mean_thr" value="90.0"/>
+    <param name="bright_mean_thr" value="170.0"/>
+    <param name="low_contrast_std_thr" value="35.0"/>
+    <param name="sat_thr" value="245"/>
+    <param name="dark_thr" value="10"/>
+    <param name="sat_ratio_thr" value="0.12"/>
+    <param name="dark_ratio_thr" value="0.12"/>
+
+    <!-- step sizes -->
+    <param name="gamma_step" value="0.05"/>
+    <param name="gamma_step_saturated" value="0.08"/>
+    <param name="clahe_step" value="0.2"/>
+
+    <!-- bounds -->
+    <param name="gamma_min" value="0.70"/>
+    <param name="gamma_max" value="1.60"/>
+    <param name="clahe_min" value="1.2"/>
+    <param name="clahe_max" value="3.8"/>
+
   </node>
 </launch>
