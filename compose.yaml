@@ -7,6 +7,9 @@ services:
     network_mode: host
     ipc: host
     privileged: true
+    tty: true
+    stdin_open: true
+
 
     environment:
       - ROS_MASTER_URI=http://localhost:11311
@@ -16,6 +19,5 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev:/dev
 
-    command: >
-      roslaunch image_preprocess preprocess.launch
+    command: roslaunch image_preprocess preprocess.launch 
 

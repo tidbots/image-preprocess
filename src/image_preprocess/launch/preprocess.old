@@ -1,0 +1,25 @@
+
+<launch>
+  <node pkg="image_preprocess"
+        type="preprocess_node.py"
+        name="image_preprocess"
+        output="screen">
+
+    <param name="input_topic"  value="/usb_cam/image_raw"/>
+    <param name="output_topic" value="/camera/image_preprocessed"/>
+
+    <!-- brightness thresholds -->
+    <param name="dark_thresh"   value="60"/>
+    <param name="bright_thresh" value="190"/>
+
+    <!-- gamma -->
+    <param name="gamma_dark"    value="0.6"/>
+    <param name="gamma_normal"  value="1.0"/>
+    <param name="gamma_bright"  value="1.6"/>
+
+    <!-- CLAHE -->
+    <param name="use_clahe"     value="true"/>
+    <param name="clahe_clip"    value="2.0"/>
+    <param name="clahe_grid"    value="8"/>
+  </node>
+</launch>
