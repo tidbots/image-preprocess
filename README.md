@@ -2,6 +2,29 @@
 
 照明の変化に対応するための前処理ROSノード
 
+## 自動パラメータチューニング
+
+**デフォルトで自動チューニングが有効です。** 起動するだけで照明環境に自動適応します。
+
+```bash
+docker compose build && docker compose up
+```
+
+動作の仕組み：
+```
+入力画像 → 輝度統計 → 照明状態判定 → パラメータ自動調整
+              ↓
+      暗い (mean < 90)     → gamma ↑
+      明るい (mean > 170)  → gamma ↓
+      白飛び (sat > 12%)   → gamma ↓, clahe ↓
+      低コントラスト       → clahe ↑
+```
+
+手動でパラメータを固定したい場合は、プリセットを使用：
+```xml
+<param name="preset" value="dark_venue"/>  <!-- auto_tune=OFF -->
+```
+
 ## 機能
 
 - **Gamma補正**（暗所/白飛び対策）

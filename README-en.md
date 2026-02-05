@@ -2,6 +2,29 @@
 
 A preprocessing ROS node for adapting to lighting changes
 
+## Automatic Parameter Tuning
+
+**Auto-tuning is enabled by default.** Just start the node and it automatically adapts to lighting conditions.
+
+```bash
+docker compose build && docker compose up
+```
+
+How it works:
+```
+Input image → Brightness stats → Lighting detection → Auto parameter adjustment
+                   ↓
+      Dark (mean < 90)        → gamma ↑
+      Bright (mean > 170)     → gamma ↓
+      Overexposed (sat > 12%) → gamma ↓, clahe ↓
+      Low contrast            → clahe ↑
+```
+
+To use fixed parameters instead, use a preset:
+```xml
+<param name="preset" value="dark_venue"/>  <!-- auto_tune=OFF -->
+```
+
 ## Features
 
 - **Gamma Correction** (for dark/overexposed conditions)
