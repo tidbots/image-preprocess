@@ -1,0 +1,11 @@
+std_msgs/Header header
+float32 mean_luma
+float32 std_luma
+float32 sat_ratio
+float32 dark_ratio
+float32 current_gamma
+float32 current_clahe_clip
+float32 frame_time_ms
+float32 blur_score
+bool is_overexposed
+bool is_underexposed

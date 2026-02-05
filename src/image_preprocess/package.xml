@@ -1,17 +1,20 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>image_preprocess</name>
-  <version>0.1.0</version>
-  <description>Image preprocessing node (Gamma + CLAHE)</description>
+  <version>0.2.0</version>
+  <description>Image preprocessing node (Gamma + CLAHE) with auto-tuning</description>
 
   <maintainer email="you@example.com">your name</maintainer>
-  <license>MIT</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>catkin</buildtool_depend>
 
+  <build_depend>message_generation</build_depend>
+  <exec_depend>message_runtime</exec_depend>
+
   <depend>rospy</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
 </package>
-

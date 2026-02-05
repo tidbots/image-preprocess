@@ -12,6 +12,15 @@
   - 通常のHistogram Equalizationより安全
   - 実機照明のムラに強い
 
+- **プリセット機能** (v0.2.0)
+  - 会場照明に応じた設定を簡単に切り替え
+
+- **統計情報出力** (v0.2.0)
+  - 輝度統計・処理時間をトピックで出力
+
+- **画質評価** (v0.2.0)
+  - ブラー検出、露出異常検出
+
 ## 設計方針
 
 - CPUのみ・軽量
@@ -48,12 +57,14 @@ docker compose up
         ↓
 [ preprocess_node.py ]
   ├─ 輝度統計計算 (mean / std / sat_ratio / dark_ratio)
+  ├─ 画質評価 (ブラー検出、露出チェック)
   ├─ EMA平滑化
   ├─ 自動パラメータ調整（オプション）
-  ├─ Gamma補正（LUT使用）
-  └─ CLAHE（LAB色空間のLチャンネル）
+  ├─ Gamma補正（LUT使用、ON/OFF可）
+  └─ CLAHE（LAB色空間のLチャンネル、ON/OFF可）
         ↓
 /camera/image_preprocessed (出力)
+/camera/image_preprocess_stats (統計情報)
 /camera/image_preprocess_debug (デバッグ用、オプション)
 ```
 
@@ -63,9 +74,53 @@ docker compose up
 |---------|------|------|
 | `/usb_cam/image_raw` | sensor_msgs/Image | 入力画像（設定で変更可） |
 | `/camera/image_preprocessed` | sensor_msgs/Image | 前処理済み画像 |
+| `/camera/image_preprocess_stats` | PreprocessStats | 統計情報（有効時） |
 | `/camera/image_preprocess_debug` | sensor_msgs/Image | デバッグオーバーレイ（有効時のみ） |
 
+### PreprocessStats メッセージ
+
+```
+std_msgs/Header header
+float32 mean_luma          # 平均輝度
+float32 std_luma           # 輝度標準偏差
+float32 sat_ratio          # 白飛び率
+float32 dark_ratio         # 黒つぶれ率
+float32 current_gamma      # 現在のgamma値
+float32 current_clahe_clip # 現在のCLAHE clip値
+float32 frame_time_ms      # 処理時間(ms)
+float32 blur_score         # ブラースコア（高い=シャープ）
+bool is_overexposed        # 露出オーバー
+bool is_underexposed       # 露出アンダー
+```
+
+## プリセット機能
+
+会場の照明に応じて、事前定義された設定を簡単に適用できます。
+
+| プリセット | gamma | clahe_clip | auto_tune | 用途 |
+|-----------|-------|------------|-----------|------|
+| `dark_venue` | 1.4 | 3.0 | OFF | 暗い会場 |
+| `bright_venue` | 0.85 | 1.5 | OFF | 明るすぎる会場 |
+| `uniform` | 1.0 | 2.0 | OFF | 均一な照明 |
+| `auto` | 1.1 | 2.5 | ON | 自動調整（デフォルト） |
+
+使い方:
+```xml
+<param name="preset" value="dark_venue"/>
+```
+
+個別パラメータを指定すると、プリセットの値を上書きします。
+
 ## パラメータ一覧
+
+### プリセット・機能ON/OFF
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `preset` | `auto` | プリセット名 (dark_venue, bright_venue, uniform, auto, none) |
+| `gamma_enable` | true | Gamma補正の有効化 |
+| `clahe_enable` | true | CLAHEの有効化 |
+| `stats_enable` | true | 統計トピック出力の有効化 |
 
 ### 基本パラメータ
 
@@ -73,8 +128,8 @@ docker compose up
 |-----------|-----------|------|------|
 | `input_topic` | `/usb_cam/image_raw` | - | 入力トピック名 |
 | `output_topic` | `/camera/image_preprocessed` | - | 出力トピック名 |
-| `gamma` | 1.10 | 0.70 - 1.60 | Gamma補正値 |
-| `clahe_clip` | 2.5 | 1.2 - 3.8 | CLAHEクリップリミット |
+| `gamma` | (プリセット依存) | 0.70 - 1.60 | Gamma補正値 |
+| `clahe_clip` | (プリセット依存) | 1.2 - 3.8 | CLAHEクリップリミット |
 | `clahe_grid` | 8 | - | CLAHEグリッドサイズ |
 
 ### デバッグパラメータ
@@ -82,13 +137,14 @@ docker compose up
 | パラメータ | デフォルト | 説明 |
 |-----------|-----------|------|
 | `debug_enable` | false | デバッグオーバーレイの有効化 |
+| `debug_histogram` | false | ヒストグラム表示の有効化 |
 | `debug_topic` | `/camera/image_preprocess_debug` | デバッグ出力トピック |
 
 ### 自動チューニングパラメータ
 
 | パラメータ | デフォルト | 説明 |
 |-----------|-----------|------|
-| `auto_tune_enable` | true | 自動チューニングの有効化 |
+| `auto_tune_enable` | (プリセット依存) | 自動チューニングの有効化 |
 | `ema_alpha` | 0.15 | EMA平滑化係数 |
 | `auto_tune_update_every_n` | 8 | 更新間隔（フレーム数） |
 | `auto_tune_min_update_interval` | 0.25 | 最小更新間隔（秒） |
@@ -105,22 +161,24 @@ docker compose up
 | `sat_ratio_thr` | 0.12 | 白飛び率閾値 |
 | `dark_ratio_thr` | 0.12 | 黒つぶれ率閾値 |
 
-### 調整ステップ
+### 調整ステップ・範囲
 
 | パラメータ | デフォルト | 説明 |
 |-----------|-----------|------|
 | `gamma_step` | 0.05 | Gamma調整ステップ |
 | `gamma_step_saturated` | 0.08 | 白飛び時のGamma調整ステップ |
 | `clahe_step` | 0.2 | CLAHE調整ステップ |
+| `gamma_min` / `gamma_max` | 0.70 / 1.60 | Gamma範囲 |
+| `clahe_min` / `clahe_max` | 1.2 / 3.8 | CLAHE範囲 |
 
-### 調整範囲
+### 性能監視・画質評価
 
 | パラメータ | デフォルト | 説明 |
 |-----------|-----------|------|
-| `gamma_min` | 0.70 | Gamma最小値 |
-| `gamma_max` | 1.60 | Gamma最大値 |
-| `clahe_min` | 1.2 | CLAHE最小値 |
-| `clahe_max` | 3.8 | CLAHE最大値 |
+| `warn_frame_time_ms` | 30.0 | 処理時間警告閾値(ms) |
+| `blur_threshold` | 100.0 | ブラー検出閾値（低い=ぼやけ） |
+| `overexpose_ratio` | 0.3 | 露出オーバー判定閾値 |
+| `underexpose_ratio` | 0.3 | 露出アンダー判定閾値 |
 
 ## 使い方
 
@@ -132,17 +190,41 @@ docker compose up
 
 # 別ターミナルで可視化
 rqt_image_view /camera/image_preprocessed
+
+# 統計情報の確認
+rostopic echo /camera/image_preprocess_stats
+```
+
+### プリセットの使用
+
+```xml
+<!-- 暗い会場用 -->
+<param name="preset" value="dark_venue"/>
+
+<!-- 明るい会場用 -->
+<param name="preset" value="bright_venue"/>
+```
+
+### 処理の個別ON/OFF
+
+```xml
+<!-- Gamma補正のみ無効化（効果比較用） -->
+<param name="gamma_enable" value="false"/>
 ```
 
 ### デバッグモード
 
-`preprocess.launch` の `debug_enable` を `true` に変更：
-
 ```xml
 <param name="debug_enable" value="true"/>
+<param name="debug_histogram" value="true"/>
 ```
 
-デバッグ画像には現在のパラメータと輝度統計がオーバーレイ表示されます。
+デバッグ画像には以下が表示されます：
+- 現在のパラメータ値
+- 輝度統計
+- 処理時間
+- 画質警告（OVEREXPOSED, UNDEREXPOSED, BLURRY）
+- ヒストグラム（有効時）
 
 ### Docker環境変数
 
@@ -164,51 +246,19 @@ environment:
 
 **いきなり YOLO 側を触らないのがコツ**
 
-### 照明パターン別・推奨設定
+### 照明パターン別・推奨プリセット
 
-#### A. 暗い会場（夕方・照度不足・影が強い）
+| 会場の状態 | プリセット | 備考 |
+|-----------|-----------|------|
+| 暗い（夕方・影が強い） | `dark_venue` | gamma ↑ が最優先 |
+| 明るすぎ（白飛び） | `bright_venue` | gamma < 1.0 で抑制 |
+| ムラあり（スポット照明） | `auto` | 自動調整に任せる |
+| 均一・十分な照度 | `uniform` | 最小限の補正 |
 
-症状：全体が暗い、小物が背景に溶ける、confidenceが低い
+### 鉄板設定（迷ったらこれ）
 
-```
-gamma: 1.3 〜 1.6
-clahe_clip: 3.0
-clahe_grid: 8
-```
-
-#### B. 明るすぎる会場（白飛び・直射照明）
-
-症状：白い床・テーブルが飛ぶ、物体輪郭が消える
-
-```
-gamma: 0.75 〜 0.9
-clahe_clip: 1.5
-clahe_grid: 8
-```
-
-#### C. ムラのある照明（スポットライト・影あり）
-
-症状：場所によって明るさが違う、認識が不安定
-
-```
-gamma: auto（auto_tune_enable=true）
-clahe_clip: 2.5
-clahe_grid: 8
-```
-
-#### D. 理想的な会場（均一・十分な照度）
-
-```
-gamma: 1.0
-clahe_clip: 2.0
-clahe_grid: 8
-```
-
-### 鉄板プリセット（迷ったらこれ）
-
-```
-gamma: 1.1
-clahe_clip: 2.5
+```xml
+<param name="preset" value="auto"/>
 ```
 
 ## 自動チューニングの仕組み
@@ -258,10 +308,12 @@ image-preprocess/
     └── image_preprocess/
         ├── package.xml
         ├── CMakeLists.txt
+        ├── msg/
+        │   └── PreprocessStats.msg  # 統計メッセージ定義
         ├── scripts/
-        │   └── preprocess_node.py  # メインノード
+        │   └── preprocess_node.py   # メインノード
         └── launch/
-            └── preprocess.launch   # 起動設定
+            └── preprocess.launch    # 起動設定
 ```
 
 ## ライセンス
