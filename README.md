@@ -1,242 +1,269 @@
 # image_preprocess
+
 照明の変化に対応するための前処理ROSノード
 
-Raw Imageを
-- Gamma補正（暗所/白飛び対策）
-  - 暗い → γ < 1.0
-  - 明るすぎ → γ > 1.0
+## 機能
 
-- CLAHE（局所コントラスト正規化）
+- **Gamma補正**（暗所/白飛び対策）
+  - 暗い → γ > 1.0（明るくする）
+  - 明るすぎ → γ < 1.0（暗くする）
+
+- **CLAHE**（局所コントラスト正規化）
   - 通常のHistogram Equalizationより安全
   - 実機照明のムラに強い
 
 ## 設計方針
+
 - CPUのみ・軽量
 - 照明が暗すぎ / 明るすぎ の両方に対応
 - パラメータはROS paramで調整可能
-- YOLO26向け（白飛び・黒つぶれを防止）
+- YOLO向け（白飛び・黒つぶれを防止）
 - Docker内でそのまま動作
 
-## 前提
+## 前提条件
+
 - Ubuntu 20.04 / 22.04
-- Docker / Docker Compose v2（docker compose が使える）
-- ROS Master（通常は同じマシン、roscore）
-- USBカメラ or 既存 /camera/image_raw が発行されている
+- Docker / Docker Compose v2
+- ROS Noetic
+- USBカメラ or `/camera/image_raw` トピックが発行されていること
 
+## クイックスタート
 
-## 構成
-```
-/camera/image_raw   (sensor_msgs/Image)
-        ↓
-[ preprocess_node ]
-  - 明るさ推定
-  - 自動Gamma補正
-  - CLAHE（局所コントラスト補正）
-        ↓
-/camera/image_preprocessed
-```
-
-## 準備
-```
+```bash
+# リポジトリをクローン
 git clone git@github.com:tidbots/image_preprocess.git
 cd image_preprocess
+
+# Dockerイメージをビルド
 docker compose build
 
-```
-
-##　動作確認
-```
 # 起動
-roslaunch your_pkg_name preprocess.launch
+docker compose up
+```
 
-# 可視化
+## アーキテクチャ
+
+```
+/usb_cam/image_raw (入力)
+        ↓
+[ preprocess_node.py ]
+  ├─ 輝度統計計算 (mean / std / sat_ratio / dark_ratio)
+  ├─ EMA平滑化
+  ├─ 自動パラメータ調整（オプション）
+  ├─ Gamma補正（LUT使用）
+  └─ CLAHE（LAB色空間のLチャンネル）
+        ↓
+/camera/image_preprocessed (出力)
+/camera/image_preprocess_debug (デバッグ用、オプション)
+```
+
+## ROSトピック
+
+| トピック | 型 | 説明 |
+|---------|------|------|
+| `/usb_cam/image_raw` | sensor_msgs/Image | 入力画像（設定で変更可） |
+| `/camera/image_preprocessed` | sensor_msgs/Image | 前処理済み画像 |
+| `/camera/image_preprocess_debug` | sensor_msgs/Image | デバッグオーバーレイ（有効時のみ） |
+
+## パラメータ一覧
+
+### 基本パラメータ
+
+| パラメータ | デフォルト | 範囲 | 説明 |
+|-----------|-----------|------|------|
+| `input_topic` | `/usb_cam/image_raw` | - | 入力トピック名 |
+| `output_topic` | `/camera/image_preprocessed` | - | 出力トピック名 |
+| `gamma` | 1.10 | 0.70 - 1.60 | Gamma補正値 |
+| `clahe_clip` | 2.5 | 1.2 - 3.8 | CLAHEクリップリミット |
+| `clahe_grid` | 8 | - | CLAHEグリッドサイズ |
+
+### デバッグパラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `debug_enable` | false | デバッグオーバーレイの有効化 |
+| `debug_topic` | `/camera/image_preprocess_debug` | デバッグ出力トピック |
+
+### 自動チューニングパラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `auto_tune_enable` | true | 自動チューニングの有効化 |
+| `ema_alpha` | 0.15 | EMA平滑化係数 |
+| `auto_tune_update_every_n` | 8 | 更新間隔（フレーム数） |
+| `auto_tune_min_update_interval` | 0.25 | 最小更新間隔（秒） |
+
+### 検出閾値
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `dark_mean_thr` | 90.0 | 暗い判定の平均輝度閾値 |
+| `bright_mean_thr` | 170.0 | 明るい判定の平均輝度閾値 |
+| `low_contrast_std_thr` | 35.0 | 低コントラスト判定の標準偏差閾値 |
+| `sat_thr` | 245 | 白飛びピクセル閾値 |
+| `dark_thr` | 10 | 黒つぶれピクセル閾値 |
+| `sat_ratio_thr` | 0.12 | 白飛び率閾値 |
+| `dark_ratio_thr` | 0.12 | 黒つぶれ率閾値 |
+
+### 調整ステップ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `gamma_step` | 0.05 | Gamma調整ステップ |
+| `gamma_step_saturated` | 0.08 | 白飛び時のGamma調整ステップ |
+| `clahe_step` | 0.2 | CLAHE調整ステップ |
+
+### 調整範囲
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `gamma_min` | 0.70 | Gamma最小値 |
+| `gamma_max` | 1.60 | Gamma最大値 |
+| `clahe_min` | 1.2 | CLAHE最小値 |
+| `clahe_max` | 3.8 | CLAHE最大値 |
+
+## 使い方
+
+### 動作確認
+
+```bash
+# 起動
+docker compose up
+
+# 別ターミナルで可視化
 rqt_image_view /camera/image_preprocessed
 ```
 
-## パラメータチューニング指針（会場照明別）
-対象ノード：
-- image_preprocess（Gamma / CLAHE）
+### デバッグモード
 
-### 0. チューニングの基本方針（重要）
+`preprocess.launch` の `debug_enable` を `true` に変更：
+
+```xml
+<param name="debug_enable" value="true"/>
+```
+
+デバッグ画像には現在のパラメータと輝度統計がオーバーレイ表示されます。
+
+### Docker環境変数
+
+`compose.yaml` で ROS Master の接続先を変更できます：
+
+```yaml
+environment:
+  - ROS_MASTER_URI=http://192.168.1.100:11311  # 別マシンのROS Master
+  - ROS_IP=192.168.1.50                         # 自身のIP
+```
+
+## パラメータチューニング指針
+
+### チューニングの基本方針
+
 1. まず前処理（画像の見え）を安定させる
 2. 次に YOLO の conf / tile を調整
 3. 最後に Depth ROI を詰める
 
-👉 いきなり YOLO 側を触らないのがコツ
+**いきなり YOLO 側を触らないのがコツ**
 
-### 1.照明パターン別・推奨設定
+### 照明パターン別・推奨設定
+
 #### A. 暗い会場（夕方・照度不足・影が強い）
-症状
-- 全体が暗い
-- 小物が背景に溶ける
-- confidence が全体的に低い
 
-image_preprocess
+症状：全体が暗い、小物が背景に溶ける、confidenceが低い
+
 ```
 gamma: 1.3 〜 1.6
 clahe_clip: 3.0
 clahe_grid: 8
 ```
 
-✅ ポイント
-- 暗い会場では gamma ↑ が最優先
-
 #### B. 明るすぎる会場（白飛び・直射照明）
-症状
-- 白い床・テーブルが飛ぶ
-- ハイライトで物体輪郭が消える
 
-image_preprocess
+症状：白い床・テーブルが飛ぶ、物体輪郭が消える
+
 ```
 gamma: 0.75 〜 0.9
 clahe_clip: 1.5
 clahe_grid: 8
 ```
 
-✅ ポイント
-- gamma < 1.0 で白飛び抑制
-- CLAHE を強くしすぎない（ノイズ化する）
-
 #### C. ムラのある照明（スポットライト・影あり）
-症状
-- 場所によって明るさが違う
-- 同じ物体が認識されたりされなかったり
 
-image_preprocess
+症状：場所によって明るさが違う、認識が不安定
+
 ```
-gamma: auto（暗→1.3 / 明→0.85）
+gamma: auto（auto_tune_enable=true）
 clahe_clip: 2.5
 clahe_grid: 8
 ```
-※ auto は平均輝度で切り替え（実装済みなら有効）
 
 #### D. 理想的な会場（均一・十分な照度）
-症状
-- 全体が見やすい
-- 認識は安定
 
-image_preprocess
 ```
 gamma: 1.0
 clahe_clip: 2.0
 clahe_grid: 8
 ```
 
-### 3. 会場入り後の「5分チューニング手順」
-#### ① 画像を見る
-```
-rqt_image_view /camera/image_preprocessed
-```
-- 暗い → gamma ↑
-- 白飛び → gamma ↓
+### 鉄板プリセット（迷ったらこれ）
 
-### 4. 鉄板プリセット
-万能スタート設定（迷ったらこれ）
 ```
 gamma: 1.1
 clahe_clip: 2.5
 ```
 
+## 自動チューニングの仕組み
 
-## 照明変化に対するパラメータの自動再チューニング
-- image_preprocess：自動Gamma/CLAHE（照明変化の主因をここで吸収）
+### 監視指標
 
-launch でON/OFF可
+各フレームで以下を計算（EMA平滑化）：
 
-### 使い方（ON/OFF の切替）
-自動再チューニング ON（推奨）
-```
-launch 内で auto_tune_enable=true
-```
+| 指標 | 意味 |
+|------|------|
+| mean_luma | 全体の明るさ |
+| std_luma | 明るさのばらつき |
+| sat_ratio | 白飛び率（>245） |
+| dark_ratio | 黒つぶれ率（<10） |
 
-OFF（固定パラメータで運用）
-```
-launch 内で auto_tune_enable=false
-```
+### 照明状態の分類
 
-### 方針
-```
-camera
-  ↓
-image_preprocess
-  ├─ 輝度統計（mean / std）
-  ├─ gamma 自動調整
-  └─ clahe 自動調整
-```
+| 状態 | 条件 |
+|------|------|
+| DARK | mean < 90 |
+| BRIGHT | mean > 170 |
+| SATURATED | sat_ratio > 0.12 |
+| LOW_CONTRAST | std < 35 |
+| NORMAL | 上記以外 |
 
-### 照明変化の検出（image_preprocess側）
-#### ① 監視指標（軽量・確実）
-各フレームで以下を計算：
+### 自動調整ルール
 
-指標	意味
-- mean_luma	全体の明るさ
-- std_luma	明るさのばらつき
-- sat_ratio	白飛び率（>245）
-- dark_ratio	黒潰れ率（<10）
-
-#### 照明状態の分類（例）
-状態	条件
-- DARK	mean < 90
-- BRIGHT	mean > 170
-- SATURATED	sat_ratio > 0.15
-- LOW_CONTRAST	std < 35
-- NORMAL	上記以外
-
-※ 10フレーム移動平均で判定（瞬間変化に反応しない）  
-
-### Gamma / CLAHE の自動調整（preprocess）
-基本ルール（安全側）
 - 暗い → gamma ↑
 - 明るい → gamma ↓
 - 白飛び → gamma ↓ + clahe_clip ↓
 - コントラスト低 → clahe_clip ↑
 
-実際の制御例
-```
-if state == "DARK":
-    gamma = min(gamma + 0.05, 1.6)
-elif state == "BRIGHT":
-    gamma = max(gamma - 0.05, 0.7)
-elif state == "SATURATED":
-    gamma = max(gamma - 0.08, 0.75)
-    clahe_clip = max(clahe_clip - 0.2, 1.5)
-elif state == "LOW_CONTRAST":
-    clahe_clip = min(clahe_clip + 0.3, 3.5)
-```
-⚠️ 1フレームで大きく変えない（±0.05）
+**1フレームで大きく変えない（±0.05）**
 
+## プロジェクト構成
 
-### フィードバックループ（重要）
 ```
-照明変化
- ↓
-preprocess 自動調整
- ↓
-yolo confidence 改善？
- ↓
-YES → 何もしない
-NO  → yolo 側も微調整
+image_preprocess/
+├── README.md
+├── README-en.md          # English version
+├── LICENSE               # Apache 2.0
+├── compose.yaml          # Docker Compose設定
+├── docker/
+│   ├── Dockerfile        # ROS Noetic + OpenCV
+│   └── entrypoint.sh     # ROS環境セットアップ
+└── src/
+    └── image_preprocess/
+        ├── package.xml
+        ├── CMakeLists.txt
+        ├── scripts/
+        │   └── preprocess_node.py  # メインノード
+        └── launch/
+            └── preprocess.launch   # 起動設定
 ```
 
-絶対にやらないこと
-- モデル切替
-- imgsz 変更
-- 再学習
-- ノード再起動
+## ライセンス
 
-### 競技向けフェイルセーフ設計
-状態遷移（イメージ）
-```
-NORMAL
- ↓（照明変化）
-ADJUSTING
- ↓（改善）
-STABLE
- ↓（失敗）
-DEGRADED（conf↓ tile↑ ROI緩和）
-```
-
-DEGRADED 状態でも動き続ける
-- タスク中に止まらない
-
-
+Apache 2.0
